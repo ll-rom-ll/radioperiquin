@@ -1,0 +1,15 @@
+{
+  "name": "radio-periquin-cloud",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "Backend central de configuración y contenido para Radio Periquín.",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "check": "node scripts/check.mjs",
+    "smoke": "node scripts/smoke-test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Radio Periquín Cloud · Panel de pruebas</title>
+<style>
+:root{font-family:Inter,system-ui,sans-serif;color:#073e42;background:#eefafa}*{box-sizing:border-box}body{margin:0}.shell{max-width:1120px;margin:auto;padding:28px}.top{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-bottom:20px}.brand h1{margin:0;font-size:28px}.brand p{margin:4px 0 0;color:#47777a}.pill{background:#fff;border:1px solid #cce7e8;border-radius:999px;padding:10px 14px;font-weight:700}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{background:#fff;border:1px solid #d4ecec;border-radius:22px;padding:20px;box-shadow:0 8px 30px #073e4210}.card.full{grid-column:1/-1}h2{margin:0 0 14px;font-size:18px}label{display:block;font-weight:700;font-size:13px;margin:12px 0 6px}input,textarea{width:100%;border:1px solid #bddcde;border-radius:12px;padding:11px 12px;font:inherit;color:#073e42;background:#fbffff}textarea{min-height:96px;resize:vertical}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}button{border:0;border-radius:12px;padding:11px 16px;font-weight:800;cursor:pointer;background:#087e86;color:white}button.secondary{background:#e4f5f4;color:#075e64}.status{margin-top:12px;padding:10px 12px;border-radius:12px;background:#eff8e1;color:#315b16;white-space:pre-wrap}.status.error{background:#ffe8e6;color:#872c25}.hint{font-size:12px;color:#5c8082;margin-top:6px}.media-row{display:flex;gap:10px;align-items:end}.media-row>div{flex:1}@media(max-width:760px){.grid{grid-template-columns:1fr}.card.full{grid-column:auto}.top{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="top"><div class="brand"><h1>Radio Periquín Cloud</h1><p>Panel temporal para probar publicación remota antes de Studio Desktop.</p></div><div class="pill" id="versionPill">Versión —</div></div>
+  <div class="grid">
+    <section class="card full"><h2>Acceso administrativo</h2><label>Token</label><input id="token" type="password" placeholder="RADIO_ADMIN_TOKEN"><div class="actions"><button class="secondary" id="loadBtn">Cargar contenido actual</button></div><div class="hint">El token se guarda solo en sessionStorage de este navegador.</div></section>
+    <section class="card"><h2>Radio y portada</h2><label>URL pública del stream</label><input id="streamUrl"><label>Nombre de estación</label><input id="stationName"><label>Subtítulo</label><input id="tagline"><label>Programa actual</label><input id="currentProgram"><label>Presentador / subtítulo</label><input id="host"><label>Texto alternativo si SonicPanel no envía título</label><input id="fallbackNowPlaying"></section>
+    <section class="card"><h2>Contenido de inicio</h2><label>Próximo programa</label><input id="nextProgram"><label>Hora</label><input id="nextTime"><label>Aviso</label><textarea id="announcement"></textarea><label>URL de imagen principal</label><input id="heroImageUrl"><label>Descripción accesible</label><input id="heroImageAlt"></section>
+    <section class="card"><h2>Imagen principal</h2><div class="media-row"><div><label>Subir PNG/JPG/WEBP/GIF</label><input id="heroFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></div><button id="uploadBtn">Subir</button></div><div class="hint">Al subirla se copiará automáticamente la URL al campo de imagen principal. Publica después para aplicar el cambio.</div></section>
+    <section class="card"><h2>Escucha segura</h2><label>Título</label><input id="safeTitle"><label>Mensaje</label><textarea id="safeMessage"></textarea></section>
+    <section class="card full"><h2>Programación</h2><textarea id="programs" style="min-height:240px;font-family:ui-monospace,monospace"></textarea><div class="hint">JSON array. Más adelante Studio Desktop tendrá un editor visual para esta lista.</div></section>
+    <section class="card full"><h2>Cuentos</h2><textarea id="stories" style="min-height:220px;font-family:ui-monospace,monospace"></textarea></section>
+    <section class="card full"><div class="actions"><button id="publishBtn">PUBLICAR CAMBIOS</button><button class="secondary" id="publicBtn">Ver JSON público</button></div><div id="status" class="status">Listo.</div></section>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id); let current=null;
+const keys=['streamUrl','stationName','tagline','currentProgram','host','fallbackNowPlaying','nextProgram','nextTime','announcement','heroImageUrl','heroImageAlt','safeTitle','safeMessage'];
+function token(){const v=$('token').value.trim();sessionStorage.setItem('rpToken',v);return v}
+$('token').value=sessionStorage.getItem('rpToken')||'';
+function status(msg,error=false){$('status').textContent=msg;$('status').className='status'+(error?' error':'')}
+function auth(){return {'Authorization':'Bearer '+token()}}
+function fill(c){current=c;$('versionPill').textContent='Contenido v'+c.contentVersion;$('streamUrl').value=c.radio?.streamUrl||'';$('stationName').value=c.station?.name||'';$('tagline').value=c.station?.tagline||'';$('currentProgram').value=c.home?.currentProgram||'';$('host').value=c.home?.host||'';$('fallbackNowPlaying').value=c.home?.fallbackNowPlaying||'';$('nextProgram').value=c.home?.nextProgram||'';$('nextTime').value=c.home?.nextTime||'';$('announcement').value=c.home?.announcement||'';$('heroImageUrl').value=c.home?.heroImageUrl||'';$('heroImageAlt').value=c.home?.heroImageAlt||'';$('safeTitle').value=c.safeListening?.title||'';$('safeMessage').value=c.safeListening?.message||'';$('programs').value=JSON.stringify(c.programs||[],null,2);$('stories').value=JSON.stringify(c.stories||[],null,2)}
+async function load(){status('Cargando…');try{const r=await fetch('/api/v1/admin/config',{headers:auth()});const j=await r.json();if(!r.ok)throw Error(j.error||'Error HTTP '+r.status);fill(j);status('Contenido cargado.')}catch(e){status(e.message,true)}}
+function build(){if(!current)throw Error('Carga primero el contenido actual.');return {...current,radio:{...current.radio,streamUrl:$('streamUrl').value},station:{...current.station,name:$('stationName').value,tagline:$('tagline').value},home:{...current.home,currentProgram:$('currentProgram').value,host:$('host').value,fallbackNowPlaying:$('fallbackNowPlaying').value,nextProgram:$('nextProgram').value,nextTime:$('nextTime').value,announcement:$('announcement').value,heroImageUrl:$('heroImageUrl').value,heroImageAlt:$('heroImageAlt').value},safeListening:{...current.safeListening,title:$('safeTitle').value,message:$('safeMessage').value},programs:JSON.parse($('programs').value),stories:JSON.parse($('stories').value)}}
+async function publish(){status('Publicando…');try{const r=await fetch('/api/v1/admin/config',{method:'PUT',headers:{...auth(),'Content-Type':'application/json'},body:JSON.stringify(build())});const j=await r.json();if(!r.ok)throw Error(j.error||'Error HTTP '+r.status);fill(j.config);status('Publicado correctamente. Las apps abiertas lo recibirán en su próxima sincronización.')}catch(e){status(e.message,true)}}
+async function upload(){const f=$('heroFile').files[0];if(!f)return status('Selecciona una imagen.',true);status('Subiendo imagen…');try{const r=await fetch('/api/v1/admin/media?filename='+encodeURIComponent(f.name),{method:'POST',headers:{...auth(),'Content-Type':f.type},body:f});const j=await r.json();if(!r.ok)throw Error(j.error||'Error HTTP '+r.status);$('heroImageUrl').value=j.url;status('Imagen subida. Ahora pulsa PUBLICAR CAMBIOS.')}catch(e){status(e.message,true)}}
+$('loadBtn').onclick=load;$('publishBtn').onclick=publish;$('uploadBtn').onclick=upload;$('publicBtn').onclick=()=>window.open('/api/v1/public/config','_blank');
+load();
+</script>
+</body>
+</html>
