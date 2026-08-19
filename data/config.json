@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "contentVersion": 1,
+  "updatedAt": "2026-08-16T00:00:00.000Z",
+  "radio": {
+    "streamUrl": "https://sonic2.sistemahost.es/8156/stream",
+    "serverType": "SHOUTCAST_V2"
+  },
+  "station": {
+    "name": "Radio Periquín",
+    "tagline": "La radio de los niños"
+  },
+  "home": {
+    "currentProgram": "El Club de Periquín",
+    "host": "Con Periquín y sus amigos",
+    "fallbackNowPlaying": "Música, juegos y mucha imaginación",
+    "nextProgram": "Un cuento para soñar",
+    "nextTime": "7:30 p. m.",
+    "announcement": "¡Gracias por escuchar la radio de los niños!",
+    "heroImageUrl": "",
+    "heroImageAlt": "Periquín con audífonos"
+  },
+  "safeListening": {
+    "title": "Un espacio cuidado",
+    "message": "Contenido familiar y controles sencillos pensados para escuchar con tranquilidad."
+  },
+  "storiesHero": {
+    "eyebrow": "LA HORA MÁGICA",
+    "title": "Historias que abrazan",
+    "subtitle": "Muy pronto podrás escucharlas cuando quieras."
+  },
+  "programs": [
+    {
+      "id": "buenos-dias",
+      "startMinutes": 420,
+      "time": "7:00 a. m.",
+      "title": "Buenos días, Periquín",
+      "subtitle": "Música para despertar",
+      "icon": "music",
+      "accent": "#FF7A00"
+    },
+    {
+      "id": "aprendemos-jugando",
+      "startMinutes": 540,
+      "time": "9:00 a. m.",
+      "title": "Aprendemos jugando",
+      "subtitle": "Curiosidades y retos",
+      "icon": "child",
+      "accent": "#84C51F"
+    },
+    {
+      "id": "club-periquin",
+      "startMinutes": 840,
+      "time": "2:00 p. m.",
+      "title": "El Club de Periquín",
+      "subtitle": "En vivo con sus amigos",
+      "icon": "mic",
+      "accent": "#0A858C"
+    },
+    {
+      "id": "cuento-sonar",
+      "startMinutes": 1170,
+      "time": "7:30 p. m.",
+      "title": "Un cuento para soñar",
+      "subtitle": "Historias antes de dormir",
+      "icon": "story",
+      "accent": "#8267B6"
+    }
+  ],
+  "stories": [
+    {
+      "id": "nube-bailar",
+      "title": "La nube que aprendió a bailar",
+      "theme": "Imaginación y alegría",
+      "duration": "8 min",
+      "accent": "#7568BE",
+      "imageUrl": "",
+      "status": "coming_soon"
+    },
+    {
+      "id": "semilla-valiente",
+      "title": "Periquín y la semilla valiente",
+      "theme": "Naturaleza y confianza",
+      "duration": "11 min",
+      "accent": "#84C51F",
+      "imageUrl": "",
+      "status": "coming_soon"
+    },
+    {
+      "id": "tren-suenos",
+      "title": "El tren de los sueños",
+      "theme": "Calma antes de dormir",
+      "duration": "9 min",
+      "accent": "#FF7A00",
+      "imageUrl": "",
+      "status": "coming_soon"
+    }
+  ]
+}
