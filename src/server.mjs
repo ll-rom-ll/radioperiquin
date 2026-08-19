@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadDotEnv } from './env.mjs';
 import { Persistence } from './persistence.mjs';
+import { RealtimeHub } from './realtime-hub.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,7 +21,11 @@ const ADMIN_ORIGINS = new Set((process.env.RADIO_ADMIN_ORIGINS || '').split(',')
 const ADMIN_RATE_LIMIT = Math.max(10, Number.parseInt(process.env.RADIO_ADMIN_RATE_LIMIT || '120', 10));
 const MAX_JSON_BYTES = 512 * 1024;
 const MAX_MEDIA_BYTES = 6 * 1024 * 1024;
+const REALTIME_HEARTBEAT_SECONDS = Math.max(10, Number.parseInt(process.env.RADIO_REALTIME_HEARTBEAT_SECONDS || '20', 10));
+const REALTIME_MAX_CLIENTS = Math.max(10, Number.parseInt(process.env.RADIO_REALTIME_MAX_CLIENTS || '2000', 10));
 const adminDir = path.join(ROOT, 'public', 'admin');
+
+const realtime = new RealtimeHub({ heartbeatSeconds: REALTIME_HEARTBEAT_SECONDS, maxClients: REALTIME_MAX_CLIENTS });
 
 const persistence = new Persistence({
   rootDir: ROOT,
@@ -150,10 +155,11 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         ok: true,
         service: 'radio-periquin-cloud',
-        version: '0.4.0',
+        version: '0.5.0',
         contentVersion: config.contentVersion,
         adminConfigured: Boolean(ADMIN_TOKEN),
-        persistence: storage
+        persistence: storage,
+        realtime: realtime.status()
       }, publicCorsHeaders());
     }
 
@@ -171,6 +177,14 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    if (req.method === 'GET' && pathname === '/api/v1/public/events') {
+      const config = await persistence.load();
+      if (!realtime.add(req, res, config)) {
+        return sendJson(res, 503, { error: 'Límite temporal de conexiones realtime alcanzado.' }, { 'Retry-After': '5', ...publicCorsHeaders() });
+      }
+      return;
+    }
+
     if (req.method === 'GET' && pathname === '/api/v1/admin/config') {
       if (adminRateLimited(req)) return sendJson(res, 429, { error: 'Demasiadas solicitudes administrativas.' }, adminCorsHeaders(req));
       if (!isAdmin(req)) return sendJson(res, 401, { error: 'No autorizado.' }, adminCorsHeaders(req));
@@ -182,10 +196,11 @@ const server = http.createServer(async (req, res) => {
       if (!isAdmin(req)) return sendJson(res, 401, { error: 'No autorizado.' }, adminCorsHeaders(req));
       const [config, storage] = await Promise.all([persistence.load(), persistence.status()]);
       return sendJson(res, 200, {
-        cloudVersion: '0.4.0',
+        cloudVersion: '0.5.0',
         contentVersion: config.contentVersion,
         updatedAt: config.updatedAt,
-        persistence: storage
+        persistence: storage,
+        realtime: realtime.status()
       }, { 'Cache-Control': 'no-store', ...adminCorsHeaders(req) });
     }
 
@@ -209,7 +224,8 @@ const server = http.createServer(async (req, res) => {
       if (adminRateLimited(req)) return sendJson(res, 429, { error: 'Demasiadas solicitudes administrativas.' }, adminCorsHeaders(req));
       if (!isAdmin(req)) return sendJson(res, 401, { error: 'No autorizado.' }, adminCorsHeaders(req));
       const restored = await persistence.restore(restoreMatch[1]);
-      return sendJson(res, 200, { ok: true, restoredFromVersion: Number(restoreMatch[1]), config: restored }, { 'Cache-Control': 'no-store', ...adminCorsHeaders(req) });
+      const realtimeDelivered = realtime.broadcastContent(restored, 'restore');
+      return sendJson(res, 200, { ok: true, restoredFromVersion: Number(restoreMatch[1]), config: restored, realtime: { deliveredClients: realtimeDelivered } }, { 'Cache-Control': 'no-store', ...adminCorsHeaders(req) });
     }
 
     if (req.method === 'GET' && pathname === '/api/v1/admin/media') {
@@ -226,7 +242,8 @@ const server = http.createServer(async (req, res) => {
       try { json = JSON.parse(body.toString('utf8')); }
       catch { return sendJson(res, 400, { error: 'JSON inválido.' }, adminCorsHeaders(req)); }
       const published = await persistence.publish(json);
-      return sendJson(res, 200, { ok: true, config: published }, { 'Cache-Control': 'no-store', ...adminCorsHeaders(req) });
+      const realtimeDelivered = realtime.broadcastContent(published, 'publish');
+      return sendJson(res, 200, { ok: true, config: published, realtime: { deliveredClients: realtimeDelivered } }, { 'Cache-Control': 'no-store', ...adminCorsHeaders(req) });
     }
 
     if (req.method === 'POST' && pathname === '/api/v1/admin/media') {
@@ -256,8 +273,9 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && pathname === '/') {
       return sendJson(res, 200, {
         service: 'Radio Periquín Cloud',
-        version: '0.4.0',
+        version: '0.5.0',
         publicConfig: '/api/v1/public/config',
+        publicEvents: '/api/v1/public/events',
         admin: '/admin/',
         health: '/health'
       });
@@ -274,13 +292,14 @@ const server = http.createServer(async (req, res) => {
 await persistence.init();
 
 server.listen(PORT, HOST, () => {
-  console.log(`Radio Periquín Cloud v0.4.0 escuchando en http://${HOST}:${PORT}`);
+  console.log(`Radio Periquín Cloud v0.5.0 escuchando en http://${HOST}:${PORT}`);
   console.log(`[RadioPeriquinCloud] persistencia: ${persistence.mode}`);
   if (!ADMIN_TOKEN) console.warn('ADVERTENCIA: RADIO_ADMIN_TOKEN no está configurado; las rutas administrativas están deshabilitadas.');
   if (persistence.mode !== 'supabase') console.warn('ADVERTENCIA: usando almacenamiento local. Configura SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY para persistencia externa.');
 });
 
 function shutdown(signal) {
+  realtime.closeAll();
   console.log(`[RadioPeriquinCloud] ${signal}: cerrando servidor…`);
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 10_000).unref();

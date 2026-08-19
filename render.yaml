@@ -18,3 +18,7 @@ services:
         value: radio-periquin-media
       - key: RADIO_ADMIN_RATE_LIMIT
         value: 120
+      - key: RADIO_REALTIME_HEARTBEAT_SECONDS
+        value: 20
+      - key: RADIO_REALTIME_MAX_CLIENTS
+        value: 2000

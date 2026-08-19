@@ -9,6 +9,7 @@ const normalized = normalizeConfig(config, config);
 if (normalized.radio.streamUrl !== config.radio.streamUrl) throw new Error('streamUrl inválida');
 for (const required of [
   'src/server.mjs',
+  'src/realtime-hub.mjs',
   'src/persistence.mjs',
   'src/config-store.mjs',
   'public/admin/index.html',
@@ -18,6 +19,8 @@ for (const required of [
   if (!fs.existsSync(path.join(root, required))) throw new Error('Falta ' + required);
 }
 const server = fs.readFileSync(path.join(root, 'src', 'server.mjs'), 'utf8');
-if (!server.includes("version: '0.4.0'")) throw new Error('server.mjs no reporta v0.4.0');
+if (!server.includes("version: '0.5.0'")) throw new Error('server.mjs no reporta v0.5.0');
+if (!server.includes("'/api/v1/public/events'")) throw new Error('Falta endpoint realtime público');
+if (!server.includes('broadcastContent')) throw new Error('Falta broadcast al publicar/restaurar');
 if (!server.includes('SUPABASE_SECRET_KEY')) throw new Error('Falta soporte SUPABASE_SECRET_KEY');
-console.log('Radio Periquín Cloud v0.4.0: OK · config v' + config.contentVersion + ' · persistencia local + Supabase preparada');
+console.log('Radio Periquín Cloud v0.5.0: OK · config v' + config.contentVersion + ' · Supabase + Realtime SSE preparados');

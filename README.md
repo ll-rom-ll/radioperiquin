@@ -1,8 +1,8 @@
-# Radio Periquín Cloud v0.4.0
+# Radio Periquín Cloud v0.5.0
 
 Backend central de configuración y contenido para Radio Periquín.
 
-La API pública usada por Android se mantiene compatible (`GET /api/v1/public/config`). La novedad de v0.4.0 es una capa de persistencia externa opcional basada en Supabase para que configuración, historial e imágenes sobrevivan a reinicios y redeploys de Render.
+La API pública usada por Android se mantiene compatible (`GET /api/v1/public/config`). v0.5.0 conserva la persistencia Supabase de v0.4.0 y añade un canal realtime SSE (`GET /api/v1/public/events`) para avisar inmediatamente a las apps abiertas cuando Studio publica o restaura contenido.
 
 ## Modos de almacenamiento
 
@@ -62,6 +62,7 @@ Los smoke tests no necesitan una cuenta real de Supabase: `smoke:supabase` usa u
 
 - `GET /health`
 - `GET /api/v1/public/config`
+- `GET /api/v1/public/events` — canal SSE de actualizaciones realtime
 - `GET /media/<archivo>` (solo modo local/legacy)
 
 ## Endpoints administrativos
@@ -80,3 +81,7 @@ Los smoke tests no necesitan una cuenta real de Supabase: `smoke:supabase` usa u
 Si Supabase está vacío al arrancar v0.4.0, Cloud intenta usar el contenido local existente como semilla. Si encuentra imágenes locales, intenta subirlas al bucket y sustituir sus URLs antes de crear el estado remoto.
 
 Después de que `rp_state` exista en Supabase, Supabase pasa a ser la fuente de verdad y los redeploys de Render no reinicializan el contenido.
+
+## Realtime v0.5.0
+
+Las apps Android v1.4.0 mantienen una conexión SSE mientras están abiertas. Al publicar/restaurar, Cloud emite un evento pequeño con `contentVersion`; Android vuelve a consultar el JSON público con ETag. Si SSE se corta, la app reconecta automáticamente y conserva un polling de respaldo de baja frecuencia. No hace falta ejecutar SQL adicional en Supabase para pasar de v0.4.0 a v0.5.0.
