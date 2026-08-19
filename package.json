@@ -1,13 +1,14 @@
 {
   "name": "radio-periquin-cloud",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
-  "description": "Backend central de configuración y contenido para Radio Periquín.",
+  "description": "Backend central de Radio Periquín con persistencia externa en Supabase para configuración, historial e imágenes.",
   "scripts": {
     "start": "node src/server.mjs",
     "check": "node scripts/check.mjs",
-    "smoke": "node scripts/smoke-test.mjs"
+    "smoke": "node scripts/smoke-test.mjs",
+    "smoke:supabase": "node scripts/smoke-supabase.mjs"
   },
   "engines": {
     "node": ">=20"

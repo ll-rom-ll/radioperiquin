@@ -2,17 +2,19 @@ services:
   - type: web
     name: radio-periquin-cloud
     runtime: docker
-    plan: starter
+    plan: free
     healthCheckPath: /health
     maxShutdownDelaySeconds: 30
     envVars:
       - key: RADIO_ADMIN_TOKEN
         sync: false
-      - key: RADIO_STORAGE_ROOT
-        value: /var/data/radio-periquin
+      - key: PUBLIC_BASE_URL
+        value: https://radioperiquin.onrender.com
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: SUPABASE_MEDIA_BUCKET
+        value: radio-periquin-media
       - key: RADIO_ADMIN_RATE_LIMIT
         value: 120
-    disk:
-      name: radio-periquin-data
-      mountPath: /var/data
-      sizeGB: 1

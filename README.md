@@ -1,63 +1,82 @@
-# Radio Periquín Cloud v0.3.0
+# Radio Periquín Cloud v0.4.0
 
-Backend central de Radio Periquín. Mantiene compatible la API pública usada por Android y añade funciones de CMS para Studio Desktop.
+Backend central de configuración y contenido para Radio Periquín.
 
-## Qué controla
+La API pública usada por Android se mantiene compatible (`GET /api/v1/public/config`). La novedad de v0.4.0 es una capa de persistencia externa opcional basada en Supabase para que configuración, historial e imágenes sobrevivan a reinicios y redeploys de Render.
 
-- URL pública del stream SHOUTcast/SonicPanel.
-- Nombre y subtítulo de la estación.
-- Programa actual y presentador.
-- Texto de respaldo de "Ahora suena".
-- Próximo programa, avisos e imagen principal.
-- Programación completa.
-- Cuentos e imágenes remotas.
-- Mensaje de escucha segura.
+## Modos de almacenamiento
 
-## Nuevo en v0.3.0
+### Desarrollo local
+Sin variables de Supabase, Cloud sigue usando:
 
-- Historial de publicaciones en Cloud.
-- Lectura de una versión histórica completa.
-- Restauración segura: restaurar vN crea una **versión nueva**, no sobreescribe ni borra el estado actual.
-- Listado administrativo de la biblioteca multimedia ya subida.
-- Metadata de multimedia: tamaño, fecha y si la imagen está referenciada por la configuración actual.
+- `data/config.json`
+- `data/history/`
+- `media/`
+
+### Producción recomendada
+Con `SUPABASE_URL` + `SUPABASE_SECRET_KEY`:
+
+- configuración actual → Postgres (`rp_state`)
+- historial → Postgres (`rp_history`)
+- metadata de imágenes → Postgres (`rp_media`)
+- archivos de imágenes → Supabase Storage (`radio-periquin-media`)
+
+La app Android **no se conecta a Supabase directamente**. Solo habla con Radio Periquín Cloud en Render.
 
 ## Seguridad
 
-La app pública usa únicamente `GET /api/v1/public/config` y nunca recibe `RADIO_ADMIN_TOKEN`.
-Todas las rutas `/api/v1/admin/*` requieren `Authorization: Bearer <RADIO_ADMIN_TOKEN>`.
+- `RADIO_ADMIN_TOKEN`: protege las APIs administrativas de Radio Periquín Cloud.
+- `SUPABASE_SECRET_KEY`: solo existe en el backend/Render. Nunca debe entrar en Android, Studio Desktop o GitHub.
+- Las tablas administrativas tienen RLS y permisos de `anon`/`authenticated` revocados.
+- El bucket multimedia es público únicamente para lectura de los assets que la app necesita mostrar; subir/modificar sigue siendo una operación del backend.
+
+## Preparar Supabase
+
+1. Crea un proyecto en Supabase.
+2. Abre **SQL Editor**.
+3. Ejecuta `supabase/001_radio_periquin.sql`.
+4. Copia la Project URL.
+5. Crea/copia una **Secret key** (`sb_secret_...`) para el backend.
+6. Configura en Render:
+
+```text
+SUPABASE_URL=https://TU-PROYECTO.supabase.co
+SUPABASE_SECRET_KEY=sb_secret_...
+SUPABASE_MEDIA_BUCKET=radio-periquin-media
+```
+
+Consulta `SETUP_SUPABASE_v0.4.0.md` para el procedimiento completo.
 
 ## Ejecutar localmente
 
 ```powershell
 npm run check
 npm run smoke
+npm run smoke:supabase
 npm start
 ```
 
-## Endpoints
+Los smoke tests no necesitan una cuenta real de Supabase: `smoke:supabase` usa un servidor simulado para comprobar el adapter remoto.
 
-### Públicos
+## Endpoints públicos
 
 - `GET /health`
 - `GET /api/v1/public/config`
-- `GET /media/<archivo>`
+- `GET /media/<archivo>` (solo modo local/legacy)
 
-### Administrativos
+## Endpoints administrativos
 
 - `GET /api/v1/admin/config`
 - `PUT /api/v1/admin/config`
+- `GET /api/v1/admin/system`
 - `GET /api/v1/admin/history?limit=50`
 - `GET /api/v1/admin/history/<version>`
 - `POST /api/v1/admin/restore/<version>`
 - `GET /api/v1/admin/media`
 - `POST /api/v1/admin/media?filename=...`
 
-## Persistencia
+## Migración automática inicial
 
-La configuración actual, historial e imágenes usan `RADIO_STORAGE_ROOT`:
+Si Supabase está vacío al arrancar v0.4.0, Cloud intenta usar el contenido local existente como semilla. Si encuentra imágenes locales, intenta subirlas al bucket y sustituir sus URLs antes de crear el estado remoto.
 
-- `data/config.json`
-- `data/history/`
-- `media/`
-
-**Render Free usa almacenamiento efímero.** Es adecuado para desarrollo, pero un redeploy/reinicio puede perder publicaciones e imágenes que no estén en el repositorio. Para producción usa un disco persistente o, en una fase posterior, object storage/base de datos.
+Después de que `rp_state` exista en Supabase, Supabase pasa a ser la fuente de verdad y los redeploys de Render no reinicializan el contenido.

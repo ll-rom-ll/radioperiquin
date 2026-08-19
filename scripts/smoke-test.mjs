@@ -12,7 +12,7 @@ let stderr=''; child.stderr.on('data',d=>stderr+=d);
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const headers={Authorization:`Bearer ${token}`};
 try{
-  let ok=false; for(let i=0;i<40;i++){await wait(100);try{const r=await fetch(`http://127.0.0.1:${port}/health`);if(r.ok){const h=await r.json();if(h.version!=='0.3.0')throw new Error('Health no reporta v0.3.0');ok=true;break}}catch{}}
+  let ok=false; for(let i=0;i<40;i++){await wait(100);try{const r=await fetch(`http://127.0.0.1:${port}/health`);if(r.ok){const h=await r.json();if(h.version!=='0.4.0')throw new Error('Health no reporta v0.4.0'); if(h.persistence?.mode!=='local')throw new Error('Smoke local no reporta persistencia local');ok=true;break}}catch{}}
   if(!ok) throw new Error('Servidor no inició. '+stderr);
   const pub=await fetch(`http://127.0.0.1:${port}/api/v1/public/config`); if(!pub.ok) throw new Error('GET público falló');
   const cfg=await pub.json(); const etag=pub.headers.get('etag'); if(!etag) throw new Error('Falta ETag');
@@ -32,7 +32,7 @@ try{
   const mediaJson=await media.json(); if(!mediaJson.media.length) throw new Error('Biblioteca media vacía');
   const restored=await fetch(`http://127.0.0.1:${port}/api/v1/admin/restore/${current.contentVersion}`,{method:'POST',headers}); if(!restored.ok) throw new Error('Restauración falló');
   const restoreJson=await restored.json(); if(restoreJson.config.contentVersion!==newVersion+1) throw new Error('Restauración no creó versión nueva');
-  console.log(`Smoke test OK · config v${cfg.contentVersion} · history/media/restore OK`);
+  console.log(`Smoke test v0.4.0 OK · config v${cfg.contentVersion} · local history/media/restore OK`);
 } finally {
   child.kill('SIGTERM');
   fs.rmSync(storage,{recursive:true,force:true});
