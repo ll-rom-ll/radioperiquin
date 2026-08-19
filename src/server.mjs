@@ -143,6 +143,34 @@ function serveFile(res, filePath, contentType, cacheControl = 'no-cache') {
   return true;
 }
 
+function listMedia(req) {
+  const currentText = JSON.stringify(store.load());
+  return fs.readdirSync(mediaDir)
+    .filter(name => name !== '.gitkeep')
+    .map(filename => {
+      const filePath = path.join(mediaDir, filename);
+      let stat;
+      try { stat = fs.statSync(filePath); } catch { return null; }
+      if (!stat.isFile()) return null;
+      const ext = path.extname(filename).toLowerCase();
+      const contentType = {
+        '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif'
+      }[ext] || 'application/octet-stream';
+      return {
+        filename,
+        url: `${requestBaseUrl(req)}/media/${encodeURIComponent(filename)}`,
+        bytes: stat.size,
+        contentType,
+        uploadedAt: stat.birthtime?.toISOString?.() || stat.mtime.toISOString(),
+        modifiedAt: stat.mtime.toISOString(),
+        usedInCurrent: currentText.includes(filename)
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => String(b.modifiedAt).localeCompare(String(a.modifiedAt)));
+}
+
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const pathname = decodeURIComponent(url.pathname);
@@ -159,7 +187,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, {
         ok: true,
         service: 'radio-periquin-cloud',
-        version: '0.2.0',
+        version: '0.3.0',
         contentVersion: config.contentVersion,
         adminConfigured: Boolean(ADMIN_TOKEN),
         storageRoot: STORAGE_ROOT,
@@ -185,6 +213,35 @@ const server = http.createServer(async (req, res) => {
       if (adminRateLimited(req)) return sendJson(res, 429, { error: 'Demasiadas solicitudes administrativas.' }, adminCorsHeaders(req));
       if (!isAdmin(req)) return sendJson(res, 401, { error: 'No autorizado.' }, adminCorsHeaders(req));
       return sendJson(res, 200, store.load(), { 'Cache-Control': 'no-store', ...adminCorsHeaders(req) });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/admin/history') {
+      if (adminRateLimited(req)) return sendJson(res, 429, { error: 'Demasiadas solicitudes administrativas.' }, adminCorsHeaders(req));
+      if (!isAdmin(req)) return sendJson(res, 401, { error: 'No autorizado.' }, adminCorsHeaders(req));
+      const limit = url.searchParams.get('limit') || '50';
+      return sendJson(res, 200, { history: store.listHistory(limit) }, { 'Cache-Control': 'no-store', ...adminCorsHeaders(req) });
+    }
+
+    const historyMatch = /^\/api\/v1\/admin\/history\/(\d+)$/.exec(pathname);
+    if (req.method === 'GET' && historyMatch) {
+      if (adminRateLimited(req)) return sendJson(res, 429, { error: 'Demasiadas solicitudes administrativas.' }, adminCorsHeaders(req));
+      if (!isAdmin(req)) return sendJson(res, 401, { error: 'No autorizado.' }, adminCorsHeaders(req));
+      const config = store.loadVersion(historyMatch[1]);
+      return sendJson(res, 200, { config }, { 'Cache-Control': 'no-store', ...adminCorsHeaders(req) });
+    }
+
+    const restoreMatch = /^\/api\/v1\/admin\/restore\/(\d+)$/.exec(pathname);
+    if (req.method === 'POST' && restoreMatch) {
+      if (adminRateLimited(req)) return sendJson(res, 429, { error: 'Demasiadas solicitudes administrativas.' }, adminCorsHeaders(req));
+      if (!isAdmin(req)) return sendJson(res, 401, { error: 'No autorizado.' }, adminCorsHeaders(req));
+      const restored = store.restore(restoreMatch[1]);
+      return sendJson(res, 200, { ok: true, restoredFromVersion: Number(restoreMatch[1]), config: restored }, { 'Cache-Control': 'no-store', ...adminCorsHeaders(req) });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/admin/media') {
+      if (adminRateLimited(req)) return sendJson(res, 429, { error: 'Demasiadas solicitudes administrativas.' }, adminCorsHeaders(req));
+      if (!isAdmin(req)) return sendJson(res, 401, { error: 'No autorizado.' }, adminCorsHeaders(req));
+      return sendJson(res, 200, { media: listMedia(req) }, { 'Cache-Control': 'no-store', ...adminCorsHeaders(req) });
     }
 
     if (req.method === 'PUT' && pathname === '/api/v1/admin/config') {
@@ -251,7 +308,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Radio Periquín Cloud v0.2.0 escuchando en http://${HOST}:${PORT}`);
+  console.log(`Radio Periquín Cloud v0.3.0 escuchando en http://${HOST}:${PORT}`);
   if (!ADMIN_TOKEN) console.warn('ADVERTENCIA: RADIO_ADMIN_TOKEN no está configurado; las rutas administrativas están deshabilitadas.');
 });
 
