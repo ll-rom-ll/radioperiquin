@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "contentVersion": 1,
   "updatedAt": "2026-08-16T00:00:00.000Z",
   "radio": {
@@ -95,5 +95,15 @@
       "imageUrl": "",
       "status": "coming_soon"
     }
-  ]
+  ],
+  "visibility": {
+    "announcement": true,
+    "shortcuts": true,
+    "todaySchedule": true,
+    "safeListening": true,
+    "programsTab": true,
+    "storiesTab": true,
+    "campaigns": true
+  },
+  "campaigns": []
 }

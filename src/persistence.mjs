@@ -216,6 +216,109 @@ export class Persistence {
     return this.publish(snapshot);
   }
 
+  async listSchedules(limit = 100) {
+    if (this.mode === 'local') return this.local.listSchedules(limit);
+    const safeLimit = Math.min(250, Math.max(1, Number.parseInt(String(limit), 10) || 100));
+    const rows = await this.remote.request(`/rest/v1/rp_scheduled_publications?select=id,name,status,publish_at,created_at,updated_at,published_at,published_version,error,base_content_version,config&order=created_at.desc&limit=${safeLimit}`);
+    return (Array.isArray(rows) ? rows : []).map(row => ({
+      id: row.id,
+      name: row.name || '',
+      status: row.status || 'scheduled',
+      publishAt: row.publish_at || '',
+      createdAt: row.created_at || '',
+      updatedAt: row.updated_at || '',
+      publishedAt: row.published_at || '',
+      publishedVersion: row.published_version == null ? null : Number(row.published_version),
+      error: row.error || '',
+      baseContentVersion: Number(row.base_content_version || 0),
+      config: row.config || null
+    }));
+  }
+
+  async createSchedule({ name = '', publishAt, config }) {
+    const current = await this.load();
+    const normalized = normalizeConfig(config, current);
+    const parsed = Date.parse(String(publishAt || ''));
+    if (!Number.isFinite(parsed)) throw errorWithStatus('publishAt debe ser una fecha/hora válida.', 400);
+    const now = new Date().toISOString();
+    const record = {
+      id: crypto.randomUUID(),
+      name: String(name || '').trim().slice(0, 120) || `Publicación v${Number(current.contentVersion || 0) + 1}`,
+      status: 'scheduled',
+      publish_at: new Date(parsed).toISOString(),
+      created_at: now,
+      updated_at: now,
+      base_content_version: Number(current.contentVersion || 0),
+      config: normalized
+    };
+    if (this.mode === 'local') return this.local.createSchedule({ name: record.name, publishAt: record.publish_at, config: normalized });
+    const rows = await this.remote.request('/rest/v1/rp_scheduled_publications', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
+      body: JSON.stringify(record)
+    });
+    const row = Array.isArray(rows) ? rows[0] : rows;
+    if (!row) throw errorWithStatus('Supabase no devolvió la publicación programada.', 502);
+    return {
+      id: row.id, name: row.name || record.name, status: row.status || 'scheduled', publishAt: row.publish_at || record.publish_at,
+      createdAt: row.created_at || now, updatedAt: row.updated_at || now, publishedAt: row.published_at || '',
+      publishedVersion: row.published_version == null ? null : Number(row.published_version), error: row.error || '',
+      baseContentVersion: Number(row.base_content_version || record.base_content_version), config: row.config || normalized
+    };
+  }
+
+  async claimDueSchedules(limit = 10) {
+    if (this.mode === 'local') return this.local.claimDueSchedules(limit);
+    const safeLimit = Math.min(25, Math.max(1, Number.parseInt(String(limit), 10) || 10));
+    const nowIso = new Date().toISOString();
+    const rows = await this.remote.request(`/rest/v1/rp_scheduled_publications?status=eq.scheduled&publish_at=lte.${encodeURIComponent(nowIso)}&select=id,name,status,publish_at,created_at,updated_at,published_at,published_version,error,base_content_version,config&order=publish_at.asc&limit=${safeLimit}`);
+    const claimed = [];
+    for (const row of (Array.isArray(rows) ? rows : [])) {
+      const result = await this.remote.request(`/rest/v1/rp_scheduled_publications?id=eq.${encodeURIComponent(row.id)}&status=eq.scheduled`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
+        body: JSON.stringify({ status: 'processing', updated_at: new Date().toISOString() })
+      });
+      const claimedRow = Array.isArray(result) ? result[0] : null;
+      if (claimedRow) claimed.push({
+        id: claimedRow.id, name: claimedRow.name || '', status: claimedRow.status || 'processing', publishAt: claimedRow.publish_at || '',
+        createdAt: claimedRow.created_at || '', updatedAt: claimedRow.updated_at || '', publishedAt: claimedRow.published_at || '',
+        publishedVersion: claimedRow.published_version == null ? null : Number(claimedRow.published_version), error: claimedRow.error || '',
+        baseContentVersion: Number(claimedRow.base_content_version || 0), config: claimedRow.config || {}
+      });
+    }
+    return claimed;
+  }
+
+  async completeSchedule(id, published) {
+    if (this.mode === 'local') return this.local.completeSchedule(id, published);
+    const rows = await this.remote.request(`/rest/v1/rp_scheduled_publications?id=eq.${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
+      body: JSON.stringify({ status: 'published', updated_at: new Date().toISOString(), published_at: published.updatedAt || new Date().toISOString(), published_version: Number(published.contentVersion || 0), error: '' })
+    });
+    return Array.isArray(rows) ? rows[0] || null : null;
+  }
+
+  async failSchedule(id, error) {
+    if (this.mode === 'local') return this.local.failSchedule(id, error);
+    const rows = await this.remote.request(`/rest/v1/rp_scheduled_publications?id=eq.${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
+      body: JSON.stringify({ status: 'failed', updated_at: new Date().toISOString(), error: String(error?.message || error || 'Error desconocido').slice(0, 500) })
+    });
+    return Array.isArray(rows) ? rows[0] || null : null;
+  }
+
+  async cancelSchedule(id) {
+    if (this.mode === 'local') return this.local.cancelSchedule(id);
+    const rows = await this.remote.request(`/rest/v1/rp_scheduled_publications?id=eq.${encodeURIComponent(id)}&status=eq.scheduled`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', Prefer: 'return=representation' },
+      body: JSON.stringify({ status: 'cancelled', updated_at: new Date().toISOString() })
+    });
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (!row) throw errorWithStatus('La publicación no existe o ya no está pendiente.', 409);
+    return row;
+  }
+
   localMediaList(baseUrl) {
     const currentText = JSON.stringify(this.local.load());
     return fs.readdirSync(this.localMediaDir)

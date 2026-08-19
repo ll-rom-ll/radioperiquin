@@ -1,5 +1,6 @@
 const MAX_PROGRAMS = 64;
 const MAX_STORIES = 100;
+const MAX_CAMPAIGNS = 40;
 
 function text(value, fallback = '', max = 220, allowBlank = true) {
   if (typeof value !== 'string') return fallback;
@@ -30,6 +31,17 @@ function int(value, fallback, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
+function bool(value, fallback = true) {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function isoDate(value, fallback = '') {
+  const candidate = text(value, fallback, 80, true);
+  if (!candidate) return '';
+  const parsed = Date.parse(candidate);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : fallback;
+}
+
 export function normalizeConfig(input, previous = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('El contenido publicado debe ser un objeto JSON.');
@@ -40,15 +52,18 @@ export function normalizeConfig(input, previous = {}) {
   const oldHome = previous.home ?? {};
   const oldSafe = previous.safeListening ?? {};
   const oldStoriesHero = previous.storiesHero ?? {};
+  const oldVisibility = previous.visibility ?? {};
 
   const radio = input.radio ?? {};
   const station = input.station ?? {};
   const home = input.home ?? {};
   const safe = input.safeListening ?? {};
   const storiesHero = input.storiesHero ?? {};
+  const visibility = input.visibility ?? {};
 
   const programsInput = Array.isArray(input.programs) ? input.programs : (previous.programs ?? []);
   const storiesInput = Array.isArray(input.stories) ? input.stories : (previous.stories ?? []);
+  const campaignsInput = Array.isArray(input.campaigns) ? input.campaigns : (previous.campaigns ?? []);
 
   const streamUrl = httpsUrl(radio.streamUrl, oldRadio.streamUrl ?? '');
   if (!streamUrl) throw new Error('radio.streamUrl debe ser una URL HTTPS válida.');
@@ -80,8 +95,25 @@ export function normalizeConfig(input, previous = {}) {
     status: ['coming_soon', 'available'].includes(item?.status) ? item.status : 'coming_soon'
   }));
 
+  const campaigns = campaignsInput.slice(0, MAX_CAMPAIGNS).map((item, index) => {
+    const startAt = isoDate(item?.startAt, '');
+    const endAt = isoDate(item?.endAt, '');
+    return {
+      id: text(item?.id, `campaign-${index + 1}`, 64, false).replace(/[^a-zA-Z0-9_-]/g, '-'),
+      enabled: bool(item?.enabled, true),
+      title: text(item?.title, `Campaña ${index + 1}`, 120, false),
+      message: text(item?.message, '', 260, true),
+      imageUrl: httpsUrl(item?.imageUrl, ''),
+      imageAlt: text(item?.imageAlt, '', 140, true),
+      accent: color(item?.accent, '#FF7A00'),
+      startAt,
+      endAt,
+      priority: int(item?.priority, 0, 0, 100)
+    };
+  }).filter(item => !item.startAt || !item.endAt || Date.parse(item.endAt) > Date.parse(item.startAt));
+
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     contentVersion: Number(previous.contentVersion ?? 0),
     updatedAt: previous.updatedAt ?? new Date().toISOString(),
     radio: {
@@ -111,6 +143,16 @@ export function normalizeConfig(input, previous = {}) {
       title: text(storiesHero.title, oldStoriesHero.title ?? 'Historias que abrazan', 120, false),
       subtitle: text(storiesHero.subtitle, oldStoriesHero.subtitle ?? 'Muy pronto podrás escucharlas cuando quieras.', 180, true)
     },
+    visibility: {
+      announcement: bool(visibility.announcement, bool(oldVisibility.announcement, true)),
+      shortcuts: bool(visibility.shortcuts, bool(oldVisibility.shortcuts, true)),
+      todaySchedule: bool(visibility.todaySchedule, bool(oldVisibility.todaySchedule, true)),
+      safeListening: bool(visibility.safeListening, bool(oldVisibility.safeListening, true)),
+      programsTab: bool(visibility.programsTab, bool(oldVisibility.programsTab, true)),
+      storiesTab: bool(visibility.storiesTab, bool(oldVisibility.storiesTab, true)),
+      campaigns: bool(visibility.campaigns, bool(oldVisibility.campaigns, true))
+    },
+    campaigns,
     programs,
     stories
   };

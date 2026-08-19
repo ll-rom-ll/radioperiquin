@@ -23,6 +23,8 @@ const MAX_JSON_BYTES = 512 * 1024;
 const MAX_MEDIA_BYTES = 6 * 1024 * 1024;
 const REALTIME_HEARTBEAT_SECONDS = Math.max(10, Number.parseInt(process.env.RADIO_REALTIME_HEARTBEAT_SECONDS || '20', 10));
 const REALTIME_MAX_CLIENTS = Math.max(10, Number.parseInt(process.env.RADIO_REALTIME_MAX_CLIENTS || '2000', 10));
+const SCHEDULE_CHECK_SECONDS = Math.max(10, Number.parseInt(process.env.RADIO_SCHEDULE_CHECK_SECONDS || '20', 10));
+const SCHEDULE_MIN_LEAD_SECONDS = Math.max(1, Number.parseInt(process.env.RADIO_SCHEDULE_MIN_LEAD_SECONDS || '15', 10));
 const adminDir = path.join(ROOT, 'public', 'admin');
 
 const realtime = new RealtimeHub({ heartbeatSeconds: REALTIME_HEARTBEAT_SECONDS, maxClients: REALTIME_MAX_CLIENTS });
@@ -139,6 +141,43 @@ function serveFile(res, filePath, contentType, cacheControl = 'no-cache') {
   return true;
 }
 
+let processingSchedules = false;
+async function processDueSchedules(trigger = 'timer') {
+  if (processingSchedules) return { processed: 0 };
+  processingSchedules = true;
+  let processed = 0;
+  try {
+    const due = await persistence.claimDueSchedules(10);
+    for (const job of due) {
+      try {
+        const published = await persistence.publish(job.config);
+        await persistence.completeSchedule(job.id, published);
+        const delivered = realtime.broadcastContent(published, 'scheduled-publish');
+        processed += 1;
+        console.log(`[RadioPeriquinCloud] publicación programada ${job.id} ejecutada como v${published.contentVersion} · realtime ${delivered} · ${trigger}`);
+      } catch (error) {
+        try { await persistence.failSchedule(job.id, error); } catch {}
+        console.error(`[RadioPeriquinCloud] publicación programada ${job.id} falló:`, error);
+      }
+    }
+    return { processed };
+  } catch (error) {
+    console.warn(`[RadioPeriquinCloud] scheduler no disponible (${trigger}):`, error.message);
+    return { processed: 0, error: error.message };
+  } finally {
+    processingSchedules = false;
+  }
+}
+
+async function schedulingStatus() {
+  try {
+    const schedules = await persistence.listSchedules(250);
+    return { enabled: true, checkSeconds: SCHEDULE_CHECK_SECONDS, pending: schedules.filter(item => item.status === 'scheduled').length };
+  } catch (error) {
+    return { enabled: false, checkSeconds: SCHEDULE_CHECK_SECONDS, pending: 0, error: error.message };
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const pathname = decodeURIComponent(url.pathname);
@@ -151,19 +190,22 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === 'GET' && pathname === '/health') {
-      const [config, storage] = await Promise.all([persistence.load(), persistence.status()]);
+      await processDueSchedules('health');
+      const [config, storage, scheduling] = await Promise.all([persistence.load(), persistence.status(), schedulingStatus()]);
       return sendJson(res, 200, {
         ok: true,
         service: 'radio-periquin-cloud',
-        version: '0.5.0',
+        version: '0.6.0',
         contentVersion: config.contentVersion,
         adminConfigured: Boolean(ADMIN_TOKEN),
         persistence: storage,
-        realtime: realtime.status()
+        realtime: realtime.status(),
+        scheduling
       }, publicCorsHeaders());
     }
 
     if (req.method === 'GET' && pathname === '/api/v1/public/config') {
+      await processDueSchedules('public-config');
       const config = await persistence.load();
       const etag = `"rp-${config.contentVersion}"`;
       if (req.headers['if-none-match'] === etag) {
@@ -178,6 +220,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && pathname === '/api/v1/public/events') {
+      await processDueSchedules('public-events');
       const config = await persistence.load();
       if (!realtime.add(req, res, config)) {
         return sendJson(res, 503, { error: 'Límite temporal de conexiones realtime alcanzado.' }, { 'Retry-After': '5', ...publicCorsHeaders() });
@@ -196,11 +239,12 @@ const server = http.createServer(async (req, res) => {
       if (!isAdmin(req)) return sendJson(res, 401, { error: 'No autorizado.' }, adminCorsHeaders(req));
       const [config, storage] = await Promise.all([persistence.load(), persistence.status()]);
       return sendJson(res, 200, {
-        cloudVersion: '0.5.0',
+        cloudVersion: '0.6.0',
         contentVersion: config.contentVersion,
         updatedAt: config.updatedAt,
         persistence: storage,
-        realtime: realtime.status()
+        realtime: realtime.status(),
+        scheduling: await schedulingStatus()
       }, { 'Cache-Control': 'no-store', ...adminCorsHeaders(req) });
     }
 
@@ -226,6 +270,36 @@ const server = http.createServer(async (req, res) => {
       const restored = await persistence.restore(restoreMatch[1]);
       const realtimeDelivered = realtime.broadcastContent(restored, 'restore');
       return sendJson(res, 200, { ok: true, restoredFromVersion: Number(restoreMatch[1]), config: restored, realtime: { deliveredClients: realtimeDelivered } }, { 'Cache-Control': 'no-store', ...adminCorsHeaders(req) });
+    }
+
+    if (req.method === 'GET' && pathname === '/api/v1/admin/schedules') {
+      if (adminRateLimited(req)) return sendJson(res, 429, { error: 'Demasiadas solicitudes administrativas.' }, adminCorsHeaders(req));
+      if (!isAdmin(req)) return sendJson(res, 401, { error: 'No autorizado.' }, adminCorsHeaders(req));
+      await processDueSchedules('admin-list');
+      const limit = url.searchParams.get('limit') || '100';
+      return sendJson(res, 200, { schedules: await persistence.listSchedules(limit) }, { 'Cache-Control': 'no-store', ...adminCorsHeaders(req) });
+    }
+
+    if (req.method === 'POST' && pathname === '/api/v1/admin/schedules') {
+      if (adminRateLimited(req)) return sendJson(res, 429, { error: 'Demasiadas solicitudes administrativas.' }, adminCorsHeaders(req));
+      if (!isAdmin(req)) return sendJson(res, 401, { error: 'No autorizado.' }, adminCorsHeaders(req));
+      const body = await readBody(req, MAX_JSON_BYTES);
+      let json;
+      try { json = JSON.parse(body.toString('utf8')); }
+      catch { return sendJson(res, 400, { error: 'JSON inválido.' }, adminCorsHeaders(req)); }
+      const publishAtMs = Date.parse(String(json.publishAt || ''));
+      if (!Number.isFinite(publishAtMs)) return sendJson(res, 400, { error: 'Fecha/hora de publicación inválida.' }, adminCorsHeaders(req));
+      if (publishAtMs < Date.now() + SCHEDULE_MIN_LEAD_SECONDS * 1000) return sendJson(res, 400, { error: `La publicación debe programarse al menos ${SCHEDULE_MIN_LEAD_SECONDS} segundos en el futuro.` }, adminCorsHeaders(req));
+      const scheduled = await persistence.createSchedule({ name: json.name || '', publishAt: new Date(publishAtMs).toISOString(), config: json.config });
+      return sendJson(res, 201, { ok: true, schedule: scheduled }, { 'Cache-Control': 'no-store', ...adminCorsHeaders(req) });
+    }
+
+    const cancelScheduleMatch = /^\/api\/v1\/admin\/schedules\/([a-zA-Z0-9-]+)\/cancel$/.exec(pathname);
+    if (req.method === 'POST' && cancelScheduleMatch) {
+      if (adminRateLimited(req)) return sendJson(res, 429, { error: 'Demasiadas solicitudes administrativas.' }, adminCorsHeaders(req));
+      if (!isAdmin(req)) return sendJson(res, 401, { error: 'No autorizado.' }, adminCorsHeaders(req));
+      const cancelled = await persistence.cancelSchedule(cancelScheduleMatch[1]);
+      return sendJson(res, 200, { ok: true, schedule: cancelled }, { 'Cache-Control': 'no-store', ...adminCorsHeaders(req) });
     }
 
     if (req.method === 'GET' && pathname === '/api/v1/admin/media') {
@@ -273,9 +347,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && pathname === '/') {
       return sendJson(res, 200, {
         service: 'Radio Periquín Cloud',
-        version: '0.5.0',
+        version: '0.6.0',
         publicConfig: '/api/v1/public/config',
         publicEvents: '/api/v1/public/events',
+        scheduledPublications: '/api/v1/admin/schedules',
         admin: '/admin/',
         health: '/health'
       });
@@ -290,15 +365,19 @@ const server = http.createServer(async (req, res) => {
 });
 
 await persistence.init();
+await processDueSchedules('startup');
+const scheduleTimer = setInterval(() => { processDueSchedules('timer').catch(error => console.error('[RadioPeriquinCloud] scheduler:', error)); }, SCHEDULE_CHECK_SECONDS * 1000);
+scheduleTimer.unref?.();
 
 server.listen(PORT, HOST, () => {
-  console.log(`Radio Periquín Cloud v0.5.0 escuchando en http://${HOST}:${PORT}`);
+  console.log(`Radio Periquín Cloud v0.6.0 escuchando en http://${HOST}:${PORT}`);
   console.log(`[RadioPeriquinCloud] persistencia: ${persistence.mode}`);
   if (!ADMIN_TOKEN) console.warn('ADVERTENCIA: RADIO_ADMIN_TOKEN no está configurado; las rutas administrativas están deshabilitadas.');
   if (persistence.mode !== 'supabase') console.warn('ADVERTENCIA: usando almacenamiento local. Configura SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY para persistencia externa.');
 });
 
 function shutdown(signal) {
+  clearInterval(scheduleTimer);
   realtime.closeAll();
   console.log(`[RadioPeriquinCloud] ${signal}: cerrando servidor…`);
   server.close(() => process.exit(0));
